@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智能淀粉检测系统</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- marked.js 用于渲染 AI Markdown 输出 -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <style>
+    /* ── 全局 ── */
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: 'Noto Sans SC', sans-serif; background: #0a0f1e; color: #e2e8f0; margin: 0; }
+
+    /* ══════════════════════════════════════
+       加载屏
+    ══════════════════════════════════════ */
+    #loader {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #0a0f1e;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      transition: opacity 0.8s ease, visibility 0.8s ease;
+    }
+    #loader.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+    #particle-canvas { position: absolute; inset: 0; }
+
+    /* DNA 双螺旋 */
+    .dna-container { position: relative; width: 80px; height: 160px; margin-bottom: 32px; }
+    .dna-dot {
+      position: absolute; width: 10px; height: 10px; border-radius: 50%;
+      animation: dna-wave 1.6s ease-in-out infinite;
+    }
+    .dna-dot.rev { animation-name: dna-wave-rev; }
+    @keyframes dna-wave {
+      0%,100% { transform: translateX(0) scale(1); opacity: 1; }
+      50%      { transform: translateX(60px) scale(0.6); opacity: 0.4; }
+    }
+    @keyframes dna-wave-rev {
+      0%,100% { transform: translateX(60px) scale(0.6); opacity: 0.4; }
+      50%      { transform: translateX(0) scale(1); opacity: 1; }
+    }
+
+    /* 扫描线 */
+    .scan-line {
+      width: 260px; height: 2px;
+      background: linear-gradient(90deg, transparent, #38bdf8, #818cf8, transparent);
+      animation: scan 2s linear infinite; border-radius: 2px; margin-bottom: 24px;
+    }
+    @keyframes scan {
+      0%   { opacity: 0; transform: scaleX(0.2); }
+      50%  { opacity: 1; transform: scaleX(1); }
+      100% { opacity: 0; transform: scaleX(0.2); }
+    }
+
+    /* 进度条 */
+    .progress-bar-wrap { width: 280px; height: 4px; background: #1e293b; border-radius: 4px; overflow: hidden; margin-bottom: 16px; }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #38bdf8, #818cf8, #f472b6);
+      border-radius: 4px; animation: progress-fill 2.6s ease-in-out forwards;
+    }
+    @keyframes progress-fill { from { width: 0%; } to { width: 100%; } }
+
+    .loader-title {
+      font-size: 1.6rem; font-weight: 700; letter-spacing: 0.05em;
+      background: linear-gradient(135deg, #38bdf8, #818cf8, #f472b6);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    .loader-sub { font-size: 0.85rem; color: #64748b; animation: blink 1.2s step-start infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ══════════════════════════════════════
+       主体
+    ══════════════════════════════════════ */
+    #app { opacity: 0; transition: opacity 1s ease; }
+    #app.visible { opacity: 1; }
+
+    .hero-gradient {
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+      border-bottom: 1px solid #1e293b;
+    }
+
+    /* 玻璃卡片 */
+    .glass-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(56, 189, 248, 0.15);
+      border-radius: 16px; backdrop-filter: blur(12px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      transition: border-color 0.3s;
+    }
+    .glass-card:hover { border-color: rgba(56, 189, 248, 0.35); }
+
+    /* 输入框 */
+    .input-field {
+      background: #0f172a; border: 1px solid #334155;
+      border-radius: 8px; color: #e2e8f0;
+      padding: 8px 12px; width: 100%; font-size: 0.9rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      font-family: 'Noto Sans SC', sans-serif;
+    }
+    .input-field:focus { outline: none; border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56,189,248,0.15); }
+
+    /* 选择框 */
+    .select-field {
+      background: #0f172a; border: 1px solid #334155;
+      border-radius: 8px; color: #e2e8f0;
+      padding: 8px 12px; width: 100%; font-size: 0.9rem;
+      cursor: pointer; font-family: 'Noto Sans SC', sans-serif;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 12px center;
+    }
+    .select-field:focus { outline: none; border-color: #38bdf8; }
+
+    /* 主按钮 */
+    .btn-primary {
+      background: linear-gradient(135deg, #0ea5e9, #6366f1);
+      color: white; font-weight: 600; border: none;
+      border-radius: 10px; padding: 12px 28px;
+      cursor: pointer; transition: all 0.3s;
+      font-family: 'Noto Sans SC', sans-serif; letter-spacing: 0.05em;
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(99,102,241,0.4); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* AI 按钮 */
+    .btn-ai {
+      background: linear-gradient(135deg, #7c3aed, #db2777);
+      color: white; font-weight: 600; border: none;
+      border-radius: 10px; padding: 12px 20px;
+      cursor: pointer; transition: all 0.3s;
+      font-family: 'Noto Sans SC', sans-serif;
+      display: flex; align-items: center; gap: 8px; justify-content: center;
+    }
+    .btn-ai:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(124,58,237,0.4); }
+    .btn-ai:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* 次级按钮 */
+    .btn-secondary {
+      background: rgba(30,41,59,0.8); color: #94a3b8;
+      border: 1px solid #334155; border-radius: 10px;
+      padding: 10px 20px; cursor: pointer;
+      transition: all 0.3s; font-family: 'Noto Sans SC', sans-serif;
+    }
+    .btn-secondary:hover { border-color: #38bdf8; color: #38bdf8; background: rgba(56,189,248,0.08); }
+
+    /* 指标卡 */
+    .metric-card {
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      border: 1px solid #334155; border-radius: 12px;
+      padding: 16px 20px; text-align: center;
+    }
+    .metric-value {
+      font-size: 1.8rem; font-weight: 700;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+
+    /* 判定徽章 */
+    .badge-normal { background: rgba(6,95,70,0.3);  border: 1px solid #059669; color: #34d399; }
+    .badge-slight { background: rgba(146,64,14,0.3); border: 1px solid #d97706; color: #fbbf24; }
+    .badge-danger { background: rgba(127,29,29,0.3); border: 1px solid #dc2626; color: #f87171; }
+
+    .alert-warning { background: rgba(146,64,14,0.2); border: 1px solid #d97706; border-radius: 8px; padding: 10px 14px; color: #fbbf24; font-size: 0.85rem; }
+
+    /* 标准品行 */
+    .std-row { display: grid; grid-template-columns: 2rem 1fr 1fr auto; gap: 8px; align-items: center; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:none} }
+
+    .divider { border: none; border-top: 1px solid #1e293b; margin: 20px 0; }
+
+    /* 旋转指示器 */
+    .spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* AI 脉冲点 */
+    .ai-pulse { width: 8px; height: 8px; background: #a855f7; border-radius: 50%; animation: pulse-dot 1s ease-in-out infinite; display: inline-block; }
+    @keyframes pulse-dot { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:0.5} }
+
+    /* 图表容器 */
+    #chart-container { background: #0f172a; border-radius: 12px; padding: 8px; min-height: 320px; display: flex; align-items: center; justify-content: center; }
+    #chart-container img { border-radius: 8px; max-width: 100%; }
+
+    /* 结果区域 */
+    #result-section { animation: slideUp 0.5s ease; }
+    @keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:none} }
+
+    /* ══════════════════════════════════════
+       AI 分析面板
+    ══════════════════════════════════════ */
+    #ai-panel {
+      background: linear-gradient(135deg, rgba(88,28,135,0.15), rgba(15,23,42,0.95));
+      border: 1px solid rgba(168,85,247,0.3);
+      border-radius: 16px; overflow: hidden;
+    }
+    #ai-panel .ai-header {
+      background: linear-gradient(135deg, rgba(88,28,135,0.4), rgba(219,39,119,0.2));
+      padding: 14px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(168,85,247,0.2);
+    }
+
+    /* AI 输出内容区 */
+    #ai-output {
+      min-height: 120px; max-height: 520px; overflow-y: auto;
+      padding: 20px; font-size: 0.9rem; line-height: 1.8;
+      color: #e2e8f0;
+    }
+    #ai-output.streaming { border-left: 3px solid #a855f7; }
+
+    /* Markdown 样式 */
+    #ai-output h3 { color: #c4b5fd; font-size: 1rem; font-weight: 600; margin: 16px 0 8px; padding-bottom: 4px; border-bottom: 1px solid rgba(168,85,247,0.2); }
+    #ai-output h4 { color: #a78bfa; font-size: 0.95rem; font-weight: 600; margin: 12px 0 6px; }
+    #ai-output p  { margin: 6px 0; color: #cbd5e1; }
+    #ai-output ul, #ai-output ol { padding-left: 20px; margin: 6px 0; }
+    #ai-output li { margin: 4px 0; color: #cbd5e1; }
+    #ai-output strong { color: #f1f5f9; font-weight: 600; }
+    #ai-output em    { color: #94a3b8; }
+    #ai-output table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.85rem; }
+    #ai-output th { background: rgba(88,28,135,0.4); color: #e2e8f0; padding: 8px 12px; text-align: left; border: 1px solid rgba(168,85,247,0.2); }
+    #ai-output td { padding: 7px 12px; border: 1px solid rgba(168,85,247,0.15); color: #cbd5e1; }
+    #ai-output tr:nth-child(even) td { background: rgba(88,28,135,0.08); }
+    #ai-output code { background: rgba(88,28,135,0.2); color: #c4b5fd; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+    #ai-output blockquote { border-left: 3px solid #a855f7; padding-left: 12px; color: #94a3b8; margin: 8px 0; }
+
+    /* 打字光标 */
+    .typing-cursor::after { content: '▋'; animation: blink-cursor 0.8s step-start infinite; color: #a855f7; }
+    @keyframes blink-cursor { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* 模型选择标签 */
+    .model-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 500; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
+    .model-tag.active { background: rgba(168,85,247,0.3); border-color: #a855f7; color: #e9d5ff; }
+    .model-tag:not(.active) { background: rgba(30,41,59,0.6); border-color: #334155; color: #64748b; }
+    .model-tag:hover:not(.active) { border-color: #a855f7; color: #a855f7; }
+
+    /* 滚动条 */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    #ai-output::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.4); }
+
+    /* 响应式 */
+    @media (max-width: 900px) {
+      .main-grid { grid-template-columns: 1fr !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     加载动画屏
+══════════════════════════════════════ -->
+<div id="loader">
+  <canvas id="particle-canvas"></canvas>
+  <div class="dna-container" id="dna-anim"></div>
+  <div class="scan-line"></div>
+  <div class="loader-title">智能淀粉检测系统</div>
+  <div style="font-size:0.9rem;color:#475569;margin-bottom:20px;letter-spacing:0.08em;">
+    INTELLIGENT STARCH DETECTION PLATFORM
+  </div>
+  <div class="progress-bar-wrap"><div class="progress-bar-fill"></div></div>
+  <div class="loader-sub" id="loader-status">正在初始化分析引擎...</div>
+</div>
+
+<!-- ══════════════════════════════════════
+     主应用
+══════════════════════════════════════ -->
+<div id="app">
+
+  <!-- 顶部 Hero -->
+  <header class="hero-gradient py-6 px-6">
+    <div class="max-w-screen-xl mx-auto">
+      <div class="flex items-center gap-4 mb-3">
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+             style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+            <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold" style="background:linear-gradient(135deg,#38bdf8,#818cf8,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+            智能淀粉吸光度分析平台
+          </h1>
+          <p class="text-sm text-slate-400">标准曲线拟合 · AI 掺假判定 · 大模型深度分析 · PDF 报告生成</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <span class="px-3 py-1 rounded-full text-xs font-medium" style="background:rgba(6,95,70,0.3);border:1px solid #059669;color:#34d399;">● 系统就绪</span>
+        <span class="px-3 py-1 rounded-full text-xs font-medium" style="background:rgba(30,58,138,0.3);border:1px solid #3b82f6;color:#93c5fd;">线性回归 A=kC+b</span>
+        <span class="px-3 py-1 rounded-full text-xs font-medium" style="background:rgba(88,28,135,0.3);border:1px solid #9333ea;color:#d8b4fe;">AI 大模型分析</span>
+        <span class="px-3 py-1 rounded-full text-xs font-medium" style="background:rgba(15,118,110,0.3);border:1px solid #0d9488;color:#5eead4;">Powered by hiapi.online</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主内容 -->
+  <main class="max-w-screen-xl mx-auto px-4 py-6">
+    <div class="grid gap-5 main-grid" style="grid-template-columns: 340px 1fr;">
+
+      <!-- ── 左侧：数据输入 ── -->
+      <aside class="space-y-4">
+        <div class="glass-card p-5">
+          <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            数据输入面板
+          </h2>
+
+          <!-- 标准品数量 -->
+          <div class="mb-4">
+            <label class="block text-xs text-slate-400 mb-2">
+              标准品数量：<span id="num-display" class="text-sky-400 font-semibold">5</span> 个
+            </label>
+            <input type="range" id="num-std" min="2" max="12" value="5" class="w-full accent-sky-400 cursor-pointer" />
+          </div>
+
+          <!-- 表头 -->
+          <div class="grid grid-cols-2 gap-2 mb-2 px-1">
+            <span class="text-xs text-slate-500 font-medium">浓度 C (%)</span>
+            <span class="text-xs text-slate-500 font-medium">吸光度 A</span>
+          </div>
+
+          <!-- 标准品行 -->
+          <div id="std-rows" class="space-y-2 mb-4 max-h-64 overflow-y-auto pr-1"></div>
+
+          <hr class="divider" />
+
+          <!-- 样品判定 -->
+          <h3 class="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            样品智能判定
+          </h3>
+          <div class="space-y-3 mb-4">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">待测样品吸光度 A</label>
+              <input type="number" id="sample-a" step="0.001" value="0.500" class="input-field" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">理论预期浓度 (%)</label>
+              <input type="number" id="theory-c" step="0.01" value="2.30" class="input-field" />
+            </div>
+          </div>
+
+          <button id="btn-analyze" class="btn-primary w-full mb-2 text-sm" onclick="runAnalysis()">
+            开始分析与 AI 判定
+          </button>
+          <div class="grid grid-cols-2 gap-2">
+            <button class="btn-secondary text-xs" onclick="exportPDF()">📄 PDF 报告</button>
+            <button class="btn-secondary text-xs" onclick="exportCSV()">📊 CSV 数据</button>
+          </div>
+        </div>
+
+        <!-- AI 模型选择卡 -->
+        <div class="glass-card p-5" style="border-color:rgba(168,85,247,0.2);">
+          <h3 class="text-xs font-semibold mb-3 flex items-center gap-2" style="color:#c4b5fd;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/><circle cx="18" cy="6" r="3"/></svg>
+            AI 分析模型
+          </h3>
+          <select id="ai-model" class="select-field text-xs mb-3">
+            <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash（推荐·最快）</option>
+            <option value="gemini-2.5-pro">🧠 Gemini 2.5 Pro（深度分析）</option>
+            <option value="gemini-2.5-flash-search">🔍 Gemini 2.5 Flash + 搜索</option>
+            <option value="gpt-4o">💡 GPT-4o</option>
+            <option value="gpt-5">🚀 GPT-5</option>
+          </select>
+          <p class="text-xs text-slate-600">完成基础分析后，点击「AI 深度分析」获取专业解读报告</p>
+        </div>
+      </aside>
+
+      <!-- ── 右侧：结果展示 ── -->
+      <section class="space-y-4">
+
+        <!-- 空态 -->
+        <div id="empty-state" class="glass-card p-12 flex flex-col items-center justify-center text-center" style="min-height:380px;">
+          <div class="w-20 h-20 rounded-full flex items-center justify-center mb-4"
+               style="background:rgba(56,189,248,0.1);border:2px dashed rgba(56,189,248,0.3);">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="1.5">
+              <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
+            </svg>
+          </div>
+          <p class="text-slate-400 text-lg font-medium mb-2">等待数据分析</p>
+          <p class="text-slate-600 text-sm">在左侧输入标准品数据后，点击「开始分析」查看结果</p>
+        </div>
+
+        <!-- 结果区域 -->
+        <div id="result-section" class="hidden space-y-4">
+
+          <!-- 指标卡 -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="metric-card">
+              <div class="text-xs text-slate-500 mb-1">斜率 k</div>
+              <div class="metric-value" id="metric-k">—</div>
+              <div class="text-xs text-slate-600 mt-1">A/C 灵敏度</div>
+            </div>
+            <div class="metric-card">
+              <div class="text-xs text-slate-500 mb-1">截距 b</div>
+              <div class="metric-value" id="metric-b">—</div>
+              <div class="text-xs text-slate-600 mt-1">基线偏移</div>
+            </div>
+            <div class="metric-card">
+              <div class="text-xs text-slate-500 mb-1">相关系数 R²</div>
+              <div class="metric-value" id="metric-r2">—</div>
+              <div class="text-xs text-slate-600 mt-1">拟合优度</div>
+            </div>
+          </div>
+
+          <!-- R² 警告 -->
+          <div id="r2-warning" class="alert-warning hidden">⚠ R² 低于 0.999，建议检查实验数据准确性。</div>
+
+          <!-- 回归方程 -->
+          <div class="glass-card p-4">
+            <div class="text-xs text-slate-500 mb-1">回归方程</div>
+            <div id="equation-display" class="text-xl font-bold text-center py-2"
+                 style="background:linear-gradient(135deg,#38bdf8,#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+              A = k · C + b
+            </div>
+          </div>
+
+          <!-- 两列：图表 + 判定 -->
+          <div class="grid gap-4" style="grid-template-columns: 1fr 1fr;">
+            <!-- 标准曲线图 -->
+            <div class="glass-card p-4">
+              <h3 class="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                标准曲线拟合图
+              </h3>
+              <div id="chart-container">
+                <p class="text-slate-600 text-sm">图表加载中...</p>
+              </div>
+            </div>
+
+            <!-- 样品判定 -->
+            <div id="judgment-card" class="glass-card p-4 hidden">
+              <h3 class="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+                样品判定结果
+              </h3>
+              <div class="grid grid-cols-2 gap-3 mb-3">
+                <div class="metric-card">
+                  <div class="text-xs text-slate-500 mb-1">实测浓度</div>
+                  <div class="metric-value text-xl" id="calc-c">—</div>
+                  <div class="text-xs text-slate-600">单位：%</div>
+                </div>
+                <div class="metric-card">
+                  <div class="text-xs text-slate-500 mb-1">偏差值</div>
+                  <div class="metric-value text-xl" id="deviation">—</div>
+                  <div class="text-xs text-slate-600">相对偏差</div>
+                </div>
+              </div>
+              <div id="judgment-badge" class="rounded-xl py-3 px-4 text-center text-base font-bold tracking-wide">—</div>
+              <div id="judgment-desc" class="mt-2 text-xs text-slate-500 text-center"></div>
+            </div>
+          </div>
+
+          <!-- ══════════════════════════════════════
+               AI 深度分析面板
+          ══════════════════════════════════════ -->
+          <div id="ai-panel">
+            <div class="ai-header">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center"
+                     style="background:linear-gradient(135deg,#7c3aed,#db2777);">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                    <path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/>
+                    <circle cx="18" cy="6" r="3" fill="white" stroke="none"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="text-sm font-semibold" style="color:#e9d5ff;">AI 智能深度分析</div>
+                  <div class="text-xs" style="color:#9333ea;" id="ai-model-label">Powered by Gemini 2.5 Flash</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div id="ai-status-dot" class="hidden">
+                  <span class="ai-pulse"></span>
+                  <span class="text-xs ml-1" style="color:#a855f7;">分析中...</span>
+                </div>
+                <button id="btn-ai" class="btn-ai text-sm px-4 py-2" onclick="runAIAnalysis()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/>
+                  </svg>
+                  AI 深度分析
+                </button>
+              </div>
+            </div>
+
+            <!-- AI 输出区 -->
+            <div id="ai-output">
+              <div class="flex flex-col items-center justify-center py-8 text-center" id="ai-placeholder">
+                <div class="w-14 h-14 rounded-full flex items-center justify-center mb-3"
+                     style="background:rgba(88,28,135,0.2);border:1px dashed rgba(168,85,247,0.3);">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="1.5">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
+                </div>
+                <p style="color:#6b21a8;" class="text-sm font-medium">完成基础分析后</p>
+                <p style="color:#4c1d95;" class="text-xs mt-1">点击「AI 深度分析」获取专业解读</p>
+              </div>
+            </div>
+
+            <!-- AI 底部工具栏 -->
+            <div id="ai-toolbar" class="hidden px-4 py-3 flex items-center justify-between"
+                 style="border-top:1px solid rgba(168,85,247,0.15);">
+              <div class="text-xs" style="color:#6b21a8;" id="ai-token-info">分析完成</div>
+              <div class="flex gap-2">
+                <button onclick="copyAIResult()" class="text-xs px-3 py-1 rounded-lg transition-colors"
+                        style="background:rgba(88,28,135,0.2);color:#a855f7;border:1px solid rgba(168,85,247,0.2);"
+                        onmouseover="this.style.background='rgba(88,28,135,0.4)'"
+                        onmouseout="this.style.background='rgba(88,28,135,0.2)'">
+                  复制报告
+                </button>
+                <button onclick="clearAIResult()" class="text-xs px-3 py-1 rounded-lg transition-colors"
+                        style="background:rgba(30,41,59,0.6);color:#64748b;border:1px solid #334155;"
+                        onmouseover="this.style.color='#94a3b8'"
+                        onmouseout="this.style.color='#64748b'">
+                  清除
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /result-section -->
+      </section>
+    </div>
+  </main>
+
+  <!-- 页脚 -->
+  <footer class="text-center py-5 text-xs text-slate-600 border-t border-slate-800 mt-2">
+    智能淀粉检测系统 v2.0 &nbsp;|&nbsp; FastAPI + Tailwind CSS &nbsp;|&nbsp;
+    AI 分析：<a href="https://hiapi.online" target="_blank" class="text-purple-600 hover:text-purple-400">hiapi.online</a>
+    &nbsp;|&nbsp; 算法：A = k · C + b
+  </footer>
+</div>
+
+<!-- ══════════════════════════════════════
+     JavaScript
+══════════════════════════════════════ -->
+<script>
+/* ────────────────────────────────────────
+   粒子画布
+──────────────────────────────────────── */
+(function() {
+  const canvas = document.getElementById('particle-canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [];
+  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+  resize(); window.addEventListener('resize', resize);
+  function rp() {
+    return { x: Math.random()*W, y: H + Math.random()*100,
+             r: Math.random()*2+0.5, speed: Math.random()*0.8+0.3,
+             alpha: Math.random()*0.5+0.1,
+             color: ['#38bdf8','#818cf8','#f472b6','#34d399','#a855f7'][Math.floor(Math.random()*5)] };
+  }
+  for (let i=0;i<80;i++){const p=rp();p.y=Math.random()*H;particles.push(p);}
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    particles.forEach(p=>{
+      ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle=p.color;ctx.globalAlpha=p.alpha;ctx.fill();
+      p.y-=p.speed; if(p.y<-10) Object.assign(p,rp());
+    });
+    ctx.globalAlpha=1; requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ────────────────────────────────────────
+   DNA 双螺旋
+──────────────────────────────────────── */
+(function() {
+  const c = document.getElementById('dna-anim');
+  const c1=['#38bdf8','#818cf8','#f472b6','#34d399','#fb923c','#a78bfa','#38bdf8','#818cf8'];
+  const c2=['#f472b6','#34d399','#38bdf8','#818cf8','#a78bfa','#fb923c','#f472b6','#34d399'];
+  for(let i=0;i<8;i++){
+    const d1=document.createElement('div'); d1.className='dna-dot';
+    d1.style.cssText=`top:${i*20}px;left:0;background:${c1[i]};animation-delay:${i*0.2}s;box-shadow:0 0 8px ${c1[i]};`;
+    c.appendChild(d1);
+    const d2=document.createElement('div'); d2.className='dna-dot rev';
+    d2.style.cssText=`top:${i*20}px;left:0;background:${c2[i]};animation-delay:${i*0.2}s;box-shadow:0 0 8px ${c2[i]};`;
+    c.appendChild(d2);
+    const ln=document.createElement('div');
+    ln.style.cssText=`position:absolute;top:${i*20+4}px;left:5px;width:60px;height:2px;background:linear-gradient(90deg,${c1[i]},${c2[i]});opacity:0.25;border-radius:1px;`;
+    c.appendChild(ln);
+  }
+})();
+
+/* ────────────────────────────────────────
+   加载状态文字
+──────────────────────────────────────── */
+const msgs = ['正在初始化分析引擎...','加载线性回归模型...','连接 AI 大模型服务...','配置掺假判定模块...','准备 PDF 生成器...','系统就绪，即将启动...'];
+let mi = 0;
+const statusEl = document.getElementById('loader-status');
+const msgTimer = setInterval(()=>{ mi=(mi+1)%msgs.length; statusEl.textContent=msgs[mi]; }, 450);
+
+window.addEventListener('load', ()=>{
+  setTimeout(()=>{
+    clearInterval(msgTimer);
+    statusEl.textContent = '✓ 系统就绪';
+    setTimeout(()=>{
+      document.getElementById('loader').classList.add('hidden');
+      document.getElementById('app').classList.add('visible');
+      initStdRows(5);
+    }, 600);
+  }, 2800);
+});
+
+/* ────────────────────────────────────────
+   标准品行管理
+──────────────────────────────────────── */
+const defaultData = [
+  [0.0,0.010],[0.2,0.052],[0.4,0.095],[0.6,0.138],[0.8,0.180],
+  [1.0,0.222],[1.2,0.265],[1.4,0.308],[1.6,0.350],[1.8,0.393],
+  [2.0,0.435],[2.2,0.478],
+];
+
+function initStdRows(n) {
+  document.getElementById('std-rows').innerHTML = '';
+  for(let i=0;i<n;i++) addStdRow(i);
+}
+
+function addStdRow(i) {
+  const row = document.createElement('div');
+  row.className = 'std-row'; row.id = `row-${i}`;
+  const c = defaultData[i]?defaultData[i][0].toFixed(2):(i*0.2).toFixed(2);
+  const a = defaultData[i]?defaultData[i][1].toFixed(4):(i*0.042+0.01).toFixed(4);
+  row.innerHTML = `
+    <span class="text-xs text-slate-500 text-right">${i+1}</span>
+    <input type="number" step="0.001" value="${c}" class="input-field text-sm" id="c-${i}" />
+    <input type="number" step="0.0001" value="${a}" class="input-field text-sm" id="a-${i}" />
+    <button onclick="removeRow(${i})" class="text-slate-600 hover:text-red-400 transition-colors text-lg px-1">×</button>`;
+  document.getElementById('std-rows').appendChild(row);
+}
+
+function removeRow(i) {
+  const r = document.getElementById(`row-${i}`);
+  if(r) r.remove(); renumberRows();
+}
+
+function renumberRows() {
+  document.querySelectorAll('#std-rows .std-row').forEach((row,idx)=>{
+    row.id=`row-${idx}`;
+    row.querySelector('span').textContent=idx+1;
+    row.querySelector('input:nth-child(2)').id=`c-${idx}`;
+    row.querySelector('input:nth-child(3)').id=`a-${idx}`;
+    row.querySelector('button').setAttribute('onclick',`removeRow(${idx})`);
+  });
+}
+
+function getStdPoints() {
+  const rows = document.querySelectorAll('#std-rows .std-row');
+  const pts = [];
+  rows.forEach((_,idx)=>{
+    const c=parseFloat(document.getElementById(`c-${idx}`)?.value);
+    const a=parseFloat(document.getElementById(`a-${idx}`)?.value);
+    if(!isNaN(c)&&!isNaN(a)) pts.push({concentration:c,absorbance:a});
+  });
+  return pts;
+}
+
+document.getElementById('num-std').addEventListener('input', function(){
+  document.getElementById('num-display').textContent = this.value;
+  initStdRows(parseInt(this.value));
+});
+
+/* ────────────────────────────────────────
+   全局状态
+──────────────────────────────────────── */
+let lastAnalysisResult = null;
+let aiRawText = '';
+
+/* ────────────────────────────────────────
+   基础分析
+──────────────────────────────────────── */
+async function runAnalysis() {
+  const pts = getStdPoints();
+  if(pts.length<2){ showToast('至少需要 2 个标准品数据点','error'); return; }
+
+  const sA = parseFloat(document.getElementById('sample-a').value);
+  const tC = parseFloat(document.getElementById('theory-c').value);
+  const payload = { standard_points: pts,
+    sample_absorbance: isNaN(sA)?null:sA,
+    theory_concentration: isNaN(tC)?null:tC };
+
+  const btn = document.getElementById('btn-analyze');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> 分析中...';
+
+  try {
+    const resp = await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!resp.ok){const e=await resp.json();throw new Error(e.detail||'分析失败');}
+    const data = await resp.json();
+    lastAnalysisResult = {...data, standard_points: pts,
+      sample_absorbance: sA, theory_concentration: tC };
+    renderResults(data);
+    showToast('分析完成！可点击「AI 深度分析」获取专业解读','success');
+    // 清除旧 AI 结果
+    clearAIResult(true);
+  } catch(e) {
+    showToast(`错误：${e.message}`,'error');
+  } finally {
+    btn.disabled=false; btn.innerHTML='开始分析与 AI 判定';
+  }
+}
+
+/* ────────────────────────────────────────
+   渲染基础结果
+──────────────────────────────────────── */
+function renderResults(data) {
+  document.getElementById('empty-state').classList.add('hidden');
+  document.getElementById('result-section').classList.remove('hidden');
+
+  document.getElementById('metric-k').textContent = data.k.toFixed(4);
+  document.getElementById('metric-b').textContent = (data.b>=0?'+':'')+data.b.toFixed(4);
+  document.getElementById('metric-r2').textContent = data.r_squared.toFixed(6);
+
+  document.getElementById('r2-warning').classList.toggle('hidden', data.r_squared>=0.999);
+
+  const sign = data.b>=0?'+':'-';
+  document.getElementById('equation-display').textContent =
+    `A = ${data.k.toFixed(4)} · C ${sign} ${Math.abs(data.b).toFixed(4)}`;
+
+  if(data.chart_base64) {
+    document.getElementById('chart-container').innerHTML =
+      `<img src="data:image/png;base64,${data.chart_base64}" alt="标准曲线" style="border-radius:8px;max-width:100%;" />`;
+  }
+
+  const jCard = document.getElementById('judgment-card');
+  if(data.calc_concentration!=null) {
+    jCard.classList.remove('hidden');
+    document.getElementById('calc-c').textContent = data.calc_concentration.toFixed(3)+' %';
+    document.getElementById('deviation').textContent = data.deviation.toFixed(2)+' %';
+    const badge = document.getElementById('judgment-badge');
+    const desc  = document.getElementById('judgment-desc');
+    badge.className = 'rounded-xl py-3 px-4 text-center text-base font-bold tracking-wide';
+    if(data.judgment_level==='normal'){
+      badge.classList.add('badge-normal');
+      badge.textContent='✅ 判定结论：'+data.judgment;
+      desc.textContent='偏差 ≤ 5%，样品浓度与理论值高度吻合，判定为正常样品。';
+    } else if(data.judgment_level==='slight'){
+      badge.classList.add('badge-slight');
+      badge.textContent='⚠️ 判定结论：'+data.judgment;
+      desc.textContent='偏差在 5%~10% 之间，存在轻微异常，建议复测确认。';
+    } else {
+      badge.classList.add('badge-danger');
+      badge.textContent='🚨 判定结论：'+data.judgment;
+      desc.textContent='偏差 > 10%，实测浓度与理论值差异显著，疑似存在掺假情况。';
+    }
+  } else {
+    jCard.classList.add('hidden');
+  }
+}
+
+/* ────────────────────────────────────────
+   AI 流式分析
+──────────────────────────────────────── */
+async function runAIAnalysis() {
+  if(!lastAnalysisResult){ showToast('请先完成基础分析','error'); return; }
+
+  const model = document.getElementById('ai-model').value;
+  const modelNames = {
+    'gemini-2.5-flash': 'Gemini 2.5 Flash',
+    'gemini-2.5-pro':   'Gemini 2.5 Pro',
+    'gemini-2.5-flash-search': 'Gemini 2.5 Flash + 搜索',
+    'gpt-4o': 'GPT-4o',
+    'gpt-5':  'GPT-5',
+  };
+  document.getElementById('ai-model-label').textContent = `Powered by ${modelNames[model]||model}`;
+
+  const payload = {
+    ...lastAnalysisResult,
+    model: model,
+  };
+
+  const btn = document.getElementById('btn-ai');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 分析中...';
+  document.getElementById('ai-status-dot').classList.remove('hidden');
+  document.getElementById('ai-toolbar').classList.add('hidden');
+
+  // 清空输出区
+  const output = document.getElementById('ai-output');
+  output.innerHTML = '<div id="ai-content" class="typing-cursor"></div>';
+  output.classList.add('streaming');
+  aiRawText = '';
+
+  try {
+    const resp = await fetch('/api/ai-analyze', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+
+    if(!resp.ok) throw new Error('AI 分析请求失败');
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    const contentEl = document.getElementById('ai-content');
+
+    while(true) {
+      const {done, value} = await reader.read();
+      if(done) break;
+
+      const text = decoder.decode(value);
+      const lines = text.split('\n');
+
+      for(const line of lines) {
+        if(!line.startsWith('data: ')) continue;
+        try {
+          const msg = JSON.parse(line.slice(6));
+          if(msg.type === 'chunk') {
+            aiRawText += msg.content;
+            // 实时渲染 Markdown
+            contentEl.innerHTML = marked.parse(aiRawText);
+            contentEl.classList.add('typing-cursor');
+            // 自动滚动到底部
+            output.scrollTop = output.scrollHeight;
+          } else if(msg.type === 'done') {
+            contentEl.classList.remove('typing-cursor');
+            output.classList.remove('streaming');
+            document.getElementById('ai-toolbar').classList.remove('hidden');
+            document.getElementById('ai-token-info').textContent =
+              `分析完成 · 模型：${modelNames[model]||model} · 字符数：${aiRawText.length}`;
+          } else if(msg.type === 'error') {
+            throw new Error(msg.message);
+          }
+        } catch(parseErr) {
+          // 忽略非 JSON 行
+        }
+      }
+    }
+  } catch(e) {
+    document.getElementById('ai-output').innerHTML =
+      `<div class="text-red-400 text-sm p-4">❌ AI 分析失败：${e.message}</div>`;
+    showToast(`AI 分析失败：${e.message}`,'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/></svg> AI 深度分析';
+    document.getElementById('ai-status-dot').classList.add('hidden');
+  }
+}
+
+function copyAIResult() {
+  if(!aiRawText){ showToast('暂无内容可复制','error'); return; }
+  navigator.clipboard.writeText(aiRawText).then(()=>showToast('AI 报告已复制到剪贴板','success'));
+}
+
+function clearAIResult(silent=false) {
+  aiRawText = '';
+  document.getElementById('ai-output').innerHTML = `
+    <div class="flex flex-col items-center justify-center py-8 text-center" id="ai-placeholder">
+      <div class="w-14 h-14 rounded-full flex items-center justify-center mb-3"
+           style="background:rgba(88,28,135,0.2);border:1px dashed rgba(168,85,247,0.3);">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="1.5">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+      </div>
+      <p style="color:#6b21a8;" class="text-sm font-medium">完成基础分析后</p>
+      <p style="color:#4c1d95;" class="text-xs mt-1">点击「AI 深度分析」获取专业解读</p>
+    </div>`;
+  document.getElementById('ai-toolbar').classList.add('hidden');
+  if(!silent) showToast('AI 分析结果已清除','info');
+}
+
+/* ────────────────────────────────────────
+   导出功能
+──────────────────────────────────────── */
+async function exportPDF() {
+  const pts = getStdPoints();
+  if(pts.length<2){ showToast('请先录入标准品数据','error'); return; }
+  if(!lastAnalysisResult){ showToast('请先完成基础分析再导出 PDF','error'); return; }
+
+  showToast('正在生成含 AI 分析的 PDF 报告，请稍候...','info');
+  const model = document.getElementById('ai-model').value;
+  const payload = { ...lastAnalysisResult, model };
+
+  try {
+    const resp = await fetch('/api/export/pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!resp.ok) throw new Error('PDF 生成失败');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href=url; a.download=`淀粉检测报告_${new Date().toLocaleDateString('zh-CN').replace(/\//g,'-')}.pdf`;
+    a.click(); URL.revokeObjectURL(url);
+    showToast('PDF 报告已下载（含 AI 深度分析）','success');
+  } catch(e){ showToast(`错误：${e.message}`,'error'); }
+}
+
+async function exportCSV() {
+  const pts = getStdPoints();
+  if(pts.length<2){ showToast('请先录入标准品数据','error'); return; }
+  try {
+    const resp = await fetch('/api/export/csv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({standard_points:pts})});
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='standard_data.csv'; a.click();
+    URL.revokeObjectURL(url); showToast('CSV 数据已导出','success');
+  } catch(e){ showToast(`错误：${e.message}`,'error'); }
+}
+
+/* ────────────────────────────────────────
+   Toast 通知
+──────────────────────────────────────── */
+function showToast(msg, type='info') {
+  const cfg = {
+    success:{ bg:'rgba(6,95,70,0.92)',  border:'#059669', icon:'✓' },
+    error:  { bg:'rgba(127,29,29,0.92)',border:'#dc2626', icon:'✗' },
+    info:   { bg:'rgba(30,58,138,0.92)',border:'#3b82f6', icon:'ℹ' },
+  };
+  const c = cfg[type]||cfg.info;
+  const t = document.createElement('div');
+  t.style.cssText=`position:fixed;bottom:24px;right:24px;z-index:10000;background:${c.bg};border:1px solid ${c.border};border-radius:10px;padding:12px 18px;color:white;font-size:0.875rem;font-family:'Noto Sans SC',sans-serif;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,0.4);max-width:340px;animation:slideInR 0.3s ease;`;
+  t.innerHTML=`<span style="font-weight:bold;">${c.icon}</span>${msg}`;
+  if(!document.getElementById('toast-style')){
+    const s=document.createElement('style');s.id='toast-style';
+    s.textContent='@keyframes slideInR{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:none}}';
+    document.head.appendChild(s);
+  }
+  document.body.appendChild(t);
+  setTimeout(()=>{t.style.transition='opacity 0.4s';t.style.opacity='0';setTimeout(()=>t.remove(),400);},3500);
+}
+</script>
+</body>
+</html>
