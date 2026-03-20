@@ -67,9 +67,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STATIC_DIR   = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static')
+STATIC_DIR    = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'static')
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'templates')
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# 静态文件目录（本地运行时挂载，Vercel 环境下目录可能不存在则跳过）
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # ─────────────────────────────────────────────
 # 数据模型
@@ -390,9 +393,17 @@ def build_ai_prompt(req: AIAnalysisRequest) -> str:
 # ─────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    html_path = os.path.join(TEMPLATES_DIR, 'index.html')
-    with open(html_path, 'r', encoding='utf-8') as f:
-        return HTMLResponse(content=f.read())
+    # 支持多种路径，兼容本地和 Vercel 环境
+    possible_paths = [
+        os.path.join(TEMPLATES_DIR, 'index.html'),
+        os.path.join(os.path.dirname(__file__), '..', 'frontend', 'templates', 'index.html'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'templates', 'index.html'),
+    ]
+    for html_path in possible_paths:
+        if os.path.exists(html_path):
+            with open(html_path, 'r', encoding='utf-8') as f:
+                return HTMLResponse(content=f.read())
+    raise HTTPException(status_code=404, detail="页面文件未找到")
 
 @app.post("/api/analyze", response_model=AnalysisResult)
 async def analyze(req: AnalysisRequest):
